@@ -13,6 +13,25 @@
   height: 100vh;
 }
 
+
+   #sidebar {
+  width: 250px;
+  background: #202123;
+  padding: 10px;
+}
+
+.chat-item {
+  padding: 10px;
+  margin: 5px 0;
+  background: #343541;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.chat-item:hover {
+  background: #444654;
+}
+
     #chat {
       flex: 1;
       overflow-y: auto;
@@ -103,6 +122,15 @@ button:hover {
   <p>Ask anything to get started</p>
 </div>
 
+<div style="display: flex; height: 100vh;">
+
+  <div id="sidebar">
+    <button onclick="newChat()">+ New Chat</button>
+    <div id="chatList"></div>
+  </div>
+
+  <div style="flex: 1; display: flex; flex-direction: column;">
+
 <div id="chat"></div>
 
 <div id="inputArea">
@@ -112,8 +140,9 @@ button:hover {
 </div>
 
 <script>
-    let chatHistory = [];
+let chatHistory = JSON.parse(localStorage.getItem("chat")) || [];
 let firstMessage = true;
+let useVoice = false; // 🔥 ADD THIS
 
 async function send() {
     window.speechSynthesis.cancel();
@@ -132,21 +161,27 @@ async function send() {
   const typingMsg = addMessage("Thinking... ⏳", "bot");
 
   try {
-    chatHistory.push({ role: "user", content: message });
+    const apiMessages = chatHistory.map(m => ({
+  role: m.sender === "user" ? "user" : "assistant",
+  content: m.text
+}));
 
 const res = await fetch("https://my-ai-chat-gi9h.onrender.com/chat", {
   method: "POST",
   headers: {"Content-Type": "application/json"},
-  body: JSON.stringify({ messages: chatHistory }),
+  body: JSON.stringify({ messages: apiMessages }),
 });
 
 const data = await res.json();
 const reply = data.reply || "No reply";
 
 typingMsg.innerText = reply;
-chatHistory.push({ role: "assistant", content: reply });
 
-speak(reply);
+
+if (useVoice) {
+  speak(reply); // 🔊 only if voice used
+  useVoice = false; // reset after speaking
+}
 
   } catch (error) {
     typingMsg.innerText = "Server error 😢 (maybe waking up)";
@@ -154,6 +189,8 @@ speak(reply);
 }
 
 function addMessage(text, sender) {
+    
+  localStorage.setItem("chat", JSON.stringify(chatHistory));
   const chat = document.getElementById("chat");
 
   const msg = document.createElement("div");
@@ -162,11 +199,14 @@ function addMessage(text, sender) {
 
   chat.appendChild(msg);
   chat.scrollTop = chat.scrollHeight;
-
+  saveChats();
+renderChatList();
   return msg; // 🔥 VERY IMPORTANT
 }
 
 function startVoice() {
+  useVoice = true; // 🔥 user is using voice
+
   const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
   recognition.lang = "en-US";
 
@@ -189,13 +229,84 @@ function speak(text) {
 
   window.speechSynthesis.speak(speech);
 }
+// 📂 CHAT SYSTEM (ADD HERE)
+
+let allChats = JSON.parse(localStorage.getItem("allChats")) || {};
+let currentChatId = "default";
+
+function newChat() {
+  currentChatId = Date.now().toString();
+  chatHistory = [];
+  document.getElementById("chat").innerHTML = "";
+  saveChats();
+  renderChatList();
+}
+
+function saveChats() {
+  allChats[currentChatId] = chatHistory;
+  localStorage.setItem("allChats", JSON.stringify(allChats));
+}
+
+function loadChat(id) {
+  currentChatId = id;
+  chatHistory = allChats[id] || [];
+  document.getElementById("chat").innerHTML = "";
+
+  chatHistory.forEach(m => addMessage(m.text, m.sender));
+}
+
+function renderChatList() {
+  const list = document.getElementById("chatList");
+  list.innerHTML = "";
+
+  Object.keys(allChats).forEach(id => {
+    const item = document.createElement("div");
+    item.classList.add("chat-item");
+    item.innerText = "Chat " + id.slice(-4);
+
+    item.onclick = () => loadChat(id);
+
+    list.appendChild(item);
+  });
+}
+
 
 document.getElementById("input").addEventListener("keypress", function(e) {
   if (e.key === "Enter" && !e.shiftKey) {
     send();
   }
 });
-</script>
 
+window.onload = () => {
+  const chat = document.getElementById("chat");
+
+  chat.innerHTML = "";
+
+  // load current chat messages
+  chatHistory.forEach(m => {
+    const msg = document.createElement("div");
+    msg.classList.add("message", m.sender);
+    msg.innerText = m.text;
+    chat.appendChild(msg);
+  });
+
+  // hide welcome if chat exists
+  if (chatHistory.length > 0) {
+    document.getElementById("welcome").style.display = "none";
+    firstMessage = false;
+  }
+
+  // load sidebar chats
+  renderChatList();
+
+  // focus input
+  document.getElementById("input").focus();
+};
+
+
+
+</script>
+</div>
+</div>
 </body>
 </html>
