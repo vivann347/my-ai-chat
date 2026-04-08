@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>My AI Chat</title>
+  <style>
+    body {
+  margin: 0;
+  font-family: 'Segoe UI', sans-serif;
+  background: linear-gradient(135deg, #1e1f25, #343541);
+  color: white;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+    #chat {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .message {
+  max-width: 70%;
+  padding: 10px 15px;
+  margin: 10px 0;
+  border-radius: 10px;
+  animation: fadeIn 0.3s ease-in;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+    .user {
+      background: #10a37f;
+      align-self: flex-end;
+    }
+
+    .bot {
+      background: #444654;
+      align-self: flex-start;
+    }
+
+    #inputArea {
+      display: flex;
+      padding: 15px;
+      background: #40414f;
+    }
+
+    #input {
+  flex: 1;
+  padding: 12px;
+  border-radius: 8px;
+  border: none;
+  font-size: 16px;
+  outline: none;
+}
+
+button {
+  margin-left: 10px;
+  padding: 10px 15px;
+  background: #10a37f;
+  border: none;
+  color: white;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: 0.2s;
+}
+
+button:hover {
+  background: #0e8c6d;
+  transform: scale(1.05);
+}
+    #welcome {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      text-align: center;
+      opacity: 0.8;
+    }
+
+    #welcome h1 {
+      margin: 0;
+      font-size: 28px;
+    }
+
+    #welcome p {
+      margin-top: 10px;
+      font-size: 16px;
+      color: #ccc;
+    }
+  </style>
+</head>
+
+<body>
+
+<div id="welcome">
+  <h1>Welcome to My AI 🤖</h1>
+  <p>Ask anything to get started</p>
+</div>
+
+<div id="chat"></div>
+
+<div id="inputArea">
+  <input id="input" placeholder="Type a message..." />
+  <button onclick="send()">Send</button>
+<button onclick="startVoice()">🎤</button>
+</div>
+
+<script>
+    window.onload = () => {
+  const chat = document.getElementById("chat");
+
+  if (chat.children.length > 0) {
+    document.getElementById("welcome").style.display = "none";
+    firstMessage = false;
+  }
+};
+let firstMessage = true;
+
+async function send() {
+  const input = document.getElementById("input");
+  const message = input.value;
+  if (!message.trim()) return;
+
+  if (firstMessage) {
+    document.getElementById("welcome").style.display = "none";
+    firstMessage = false;
+  }
+
+  addMessage(message, "user");
+  input.value = "";
+
+  // ✅ Typing animation
+  const typingMsg = addMessage("Typing...", "bot");
+
+  const res = await fetch("http://127.0.0.1:3000/chat", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({ message }),
+  });
+
+  const data = await res.json();
+
+  // ✅ Replace typing with real response
+  typingMsg.innerText = data.reply || "No reply";
+}
+
+function addMessage(text, sender) {
+  const chat = document.getElementById("chat");
+
+  const msg = document.createElement("div");
+  msg.classList.add("message", sender);
+  msg.innerText = text;
+
+  chat.appendChild(msg);
+  chat.scrollTop = chat.scrollHeight;
+
+  return msg; // 🔥 VERY IMPORTANT
+}
+
+function startVoice() {
+  const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+  recognition.lang = "en-US";
+
+  recognition.onresult = function(event) {
+    document.getElementById("input").value =
+      event.results[0][0].transcript;
+  };
+
+  recognition.start();
+}
+
+
+document.getElementById("input").addEventListener("keypress", function(e) {
+  if (e.key === "Enter" && !e.shiftKey) {
+    send();
+  }
+});
+</script>
+
+</body>
+</html>
