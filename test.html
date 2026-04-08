@@ -112,17 +112,11 @@ button:hover {
 </div>
 
 <script>
-    window.onload = () => {
-  const chat = document.getElementById("chat");
-
-  if (chat.children.length > 0) {
-    document.getElementById("welcome").style.display = "none";
-    firstMessage = false;
-  }
-};
+    let chatHistory = [];
 let firstMessage = true;
 
 async function send() {
+    window.speechSynthesis.cancel();
   const input = document.getElementById("input");
   const message = input.value;
   if (!message.trim()) return;
@@ -135,19 +129,28 @@ async function send() {
   addMessage(message, "user");
   input.value = "";
 
-  // ✅ Typing animation
-  const typingMsg = addMessage("Typing...", "bot");
+  const typingMsg = addMessage("Thinking... ⏳", "bot");
 
-  const res = await fetch("http://127.0.0.1:3000/chat", {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({ message }),
-  });
+  try {
+    chatHistory.push({ role: "user", content: message });
 
-  const data = await res.json();
+const res = await fetch("https://my-ai-chat-gi9h.onrender.com/chat", {
+  method: "POST",
+  headers: {"Content-Type": "application/json"},
+  body: JSON.stringify({ messages: chatHistory }),
+});
 
-  // ✅ Replace typing with real response
-  typingMsg.innerText = data.reply || "No reply";
+const data = await res.json();
+const reply = data.reply || "No reply";
+
+typingMsg.innerText = reply;
+chatHistory.push({ role: "assistant", content: reply });
+
+speak(reply);
+
+  } catch (error) {
+    typingMsg.innerText = "Server error 😢 (maybe waking up)";
+  }
 }
 
 function addMessage(text, sender) {
@@ -175,6 +178,17 @@ function startVoice() {
   recognition.start();
 }
 
+function speak(text) {
+  const speech = new SpeechSynthesisUtterance(text);
+  speech.lang = "en-US";
+  speech.rate = 0.95;
+  speech.pitch = 1.1;
+
+  const voices = window.speechSynthesis.getVoices();
+  speech.voice = voices.find(v => v.lang === "en-US") || voices[0];
+
+  window.speechSynthesis.speak(speech);
+}
 
 document.getElementById("input").addEventListener("keypress", function(e) {
   if (e.key === "Enter" && !e.shiftKey) {

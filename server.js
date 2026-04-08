@@ -11,15 +11,12 @@ app.use(cors());
 
 const API_KEY = process.env.GROQ_API_KEY;
 
-console.log("KEY:", API_KEY);
-
-let conversation = [];
-
 app.post("/chat", async (req, res) => {
-  const message = req.body.message;
+  const messages = req.body.messages;
 
-  // 🧠 store user message
-  conversation.push({ role: "user", content: message });
+  if (!messages) {
+    return res.json({ reply: "No messages received ❌" });
+  }
 
   try {
     const response = await fetch(
@@ -32,28 +29,28 @@ app.post("/chat", async (req, res) => {
         },
         body: JSON.stringify({
           model: "llama-3.1-8b-instant",
-          messages: conversation,
+          messages: messages,
         }),
       }
     );
-
+    if (!response.ok) {
+  const errorText = await response.text();
+  console.log("HTTP ERROR:", errorText);
+  return res.json({ reply: "API request failed ❌" });
+}
     const data = await response.json();
 
-    console.log("DEBUG:", data);
-
     if (!data.choices) {
+      console.log("API ERROR:", data);
       return res.json({ reply: "API error ❌" });
     }
 
     const reply = data.choices[0].message.content;
 
-    // 🧠 store bot reply
-    conversation.push({ role: "assistant", content: reply });
-
     res.json({ reply });
 
   } catch (err) {
-    console.error("ERROR:", err);
+    console.error("SERVER ERROR:", err);
     res.json({ reply: "Server error 😢" });
   }
 });
