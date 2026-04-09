@@ -1107,7 +1107,7 @@
         body.className = "attachment-body";
         body.innerHTML = `
           <div class="attachment-name">${escapeHtml(attachment.name)}</div>
-          <div class="attachment-meta">${attachment.kind === "image" ? "Image" : attachment.kind === "pdf" ? "PDF" : "Text file"} • ${formatFileSize(attachment.size || 0)}</div>
+          <div class="attachment-meta">${attachment.kind === "image" ? "Image" : attachment.kind === "pdf" ? "PDF" : "Text file"} ï¿½ ${formatFileSize(attachment.size || 0)}</div>
         `;
 
         if ((attachment.kind === "text" || attachment.kind === "pdf") && attachment.extractedText) {
@@ -1230,13 +1230,13 @@
         copy.className = "pending-copy";
         copy.innerHTML = `
           <div class="pending-name">${escapeHtml(attachment.name)}</div>
-          <div class="pending-meta">${attachment.kind === "image" ? "Image" : attachment.kind === "pdf" ? "PDF" : "Text file"} • ${formatFileSize(attachment.size)}</div>
+          <div class="pending-meta">${attachment.kind === "image" ? "Image" : attachment.kind === "pdf" ? "PDF" : "Text file"} ï¿½ ${formatFileSize(attachment.size)}</div>
         `;
 
         const remove = document.createElement("button");
         remove.className = "remove-chip";
         remove.type = "button";
-        remove.innerText = "×";
+        remove.innerText = "ï¿½";
         remove.onclick = () => removePendingAttachment(attachment.id);
 
         chip.appendChild(copy);
