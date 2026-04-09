@@ -745,9 +745,9 @@
   <style>
     .sidebar-actions { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
     .chat-item-head { display:flex; align-items:center; justify-content:space-between; gap:8px; }
-    .chat-actions { display:flex; align-items:center; gap:4px; opacity:0; transition:opacity .18s ease; }
+    .chat-actions { display:flex; align-items:center; gap:4px; opacity:0; transition:opacity .18s ease; flex-shrink:0; }
     .chat-item:hover .chat-actions, .chat-item.active .chat-actions { opacity:1; }
-    .chat-action-btn { border:none; background:transparent; color:var(--muted); cursor:pointer; font-size:12px; padding:4px 6px; border-radius:8px; }
+    .chat-action-btn { border:none; background:transparent; color:var(--muted); cursor:pointer; font-size:12px; padding:6px 8px; border-radius:8px; min-height:32px; }
     .chat-action-btn:hover { background:rgba(255,255,255,.08); color:var(--text); }
     .modal-backdrop { position:fixed; inset:0; background:rgba(0,0,0,.62); backdrop-filter:blur(6px); display:grid; place-items:center; padding:20px; z-index:50; }
     .modal-card { width:min(100%,460px); background:#171717; border:1px solid var(--border); border-radius:24px; padding:24px; box-shadow:var(--shadow); display:grid; gap:16px; }
@@ -769,6 +769,87 @@
     .message pre { margin: 10px 0 0; padding: 12px; border-radius: 14px; background: #111111; overflow-x: auto; border: 1px solid rgba(255,255,255,0.08); }
     .message code { font-family: Consolas, monospace; background: rgba(255,255,255,0.08); padding: 2px 6px; border-radius: 8px; }
     .message pre code { background: transparent; padding: 0; }
+
+    @media (hover: none), (pointer: coarse) {
+      .chat-actions {
+        opacity: 1;
+      }
+
+      .chat-action-btn {
+        background: rgba(255,255,255,.06);
+      }
+    }
+
+    @media (max-width: 900px) {
+      #sidebar {
+        width: 100%;
+        max-height: none;
+        padding-bottom: 18px;
+      }
+
+      .sidebar-actions {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .new-chat-btn,
+      .logout-btn,
+      .upload-btn,
+      .ghost-btn {
+        min-height: 44px;
+      }
+
+      #chatList {
+        gap: 8px;
+      }
+
+      .chat-item {
+        padding: 12px;
+      }
+
+      .chat-item-head {
+        align-items: flex-start;
+        gap: 10px;
+      }
+
+      .chat-title {
+        white-space: normal;
+        line-height: 1.4;
+      }
+
+      .chat-actions {
+        opacity: 1;
+        flex-wrap: wrap;
+      }
+
+      .chat-action-btn {
+        min-height: 36px;
+        padding: 7px 10px;
+      }
+
+      .composer-actions {
+        flex-direction: column;
+        align-items: stretch;
+      }
+
+      .composer-left,
+      .composer-right {
+        width: 100%;
+      }
+
+      .composer-right {
+        justify-content: flex-end;
+      }
+
+      .send-btn {
+        width: 44px;
+        height: 44px;
+      }
+
+      .modal-card {
+        padding: 20px;
+        border-radius: 20px;
+      }
+    }
   </style>
 </head>
 <body>
@@ -870,6 +951,26 @@
         <div class="composer-status" id="composerStatus"></div>
       </div>
     </main>
+  </div>
+
+  <div class="modal-backdrop" id="settingsModal" hidden>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+      <h2 class="modal-title" id="settingsTitle">Settings</h2>
+      <p class="modal-copy">Use this panel to change the password for the account that is currently signed in.</p>
+      <div class="field">
+        <label for="currentPassword">Current Password</label>
+        <input id="currentPassword" type="password" placeholder="Enter current password" />
+      </div>
+      <div class="field">
+        <label for="newPassword">New Password</label>
+        <input id="newPassword" type="password" placeholder="Enter new password" />
+      </div>
+      <div class="modal-status" id="settingsStatus"></div>
+      <div class="modal-actions">
+        <button class="modal-btn" type="button" onclick="closeSettings()">Cancel</button>
+        <button class="modal-btn primary" type="button" onclick="changePassword()">Update Password</button>
+      </div>
+    </div>
   </div>
   <script>
     const TOKEN_KEY = "my_ai_token";
@@ -1712,7 +1813,6 @@
   </script>
 </body>
 </html>
-
 
 
 
