@@ -2,8 +2,10 @@
   "name": "my-ai-app",
   "version": "1.0.0",
   "type": "module",
-  "main": "index.js",
+  "main": "server.js",
   "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -15,6 +17,7 @@
     "dotenv": "^17.4.1",
     "express": "^5.2.1",
     "node-fetch": "^3.3.2",
-    "openai": "^6.33.0"
+    "openai": "^6.33.0",
+    "pdf-parse": "^2.4.5"
   }
 }
