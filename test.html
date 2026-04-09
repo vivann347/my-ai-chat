@@ -1068,6 +1068,14 @@
       status.innerText = message;
     }
 
+    function setAuthBusy(isBusy, label = "") {
+      const submit = document.getElementById("authSubmit");
+      submit.disabled = isBusy;
+      submit.style.opacity = isBusy ? "0.7" : "1";
+      submit.style.cursor = isBusy ? "wait" : "pointer";
+      submit.innerText = label || (authMode === "signup" ? "Create Account" : "Log In");
+    }
+
     function showComposerStatus(message = "", type = "") {
       const status = document.getElementById("composerStatus");
       status.className = `composer-status${type ? ` ${type}` : ""}`;
@@ -1630,20 +1638,47 @@
     async function handleAuthSubmit(event) {
       event.preventDefault();
       const name = document.getElementById("authName").value.trim();
-      const email = document.getElementById("authEmail").value.trim();
+      const email = document.getElementById("authEmail").value.trim().toLowerCase();
       const password = document.getElementById("authPassword").value;
-      showAuthStatus(authMode === "signup" ? "Creating account..." : "Signing in...");
+      const isSignup = authMode === "signup";
+
+      if (!email || !password || (isSignup && !name)) {
+        showAuthStatus("Please fill in all required fields.", "error");
+        return;
+      }
+
+      setAuthBusy(true, isSignup ? "Creating..." : "Signing in...");
+      showAuthStatus(isSignup ? "Creating account..." : "Signing in...");
 
       try {
-        const endpoint = authMode === "signup" ? "/auth/signup" : "/auth/login";
-        const payload = authMode === "signup"
+        const endpoint = isSignup ? "/auth/signup" : "/auth/login";
+        const payload = isSignup
           ? { name, email, password }
           : { email, password };
-        const data = await apiFetch(endpoint, {
-          method: "POST",
-          body: JSON.stringify(payload),
-          headers: { "Content-Type": "application/json" }
-        });
+        let data;
+
+        try {
+          data = await apiFetch(endpoint, {
+            method: "POST",
+            body: JSON.stringify(payload),
+            headers: { "Content-Type": "application/json" }
+          });
+        } catch (error) {
+          const message = String(error.message || "");
+          if (isSignup && /already exists/i.test(message)) {
+            showAuthStatus("Account already exists. Trying to log you in instead...");
+            switchAuthMode("login");
+            document.getElementById("authEmail").value = email;
+            document.getElementById("authPassword").value = password;
+            data = await apiFetch("/auth/login", {
+              method: "POST",
+              body: JSON.stringify({ email, password }),
+              headers: { "Content-Type": "application/json" }
+            });
+          } else {
+            throw error;
+          }
+        }
 
         authToken = data.token;
         localStorage.setItem(TOKEN_KEY, authToken);
@@ -1658,8 +1693,14 @@
         renderPendingUploads();
         autoResizeInput();
         updateSendButtonState();
+        showAuthStatus("");
       } catch (error) {
-        showAuthStatus(error.message, "error");
+        const fallback = authMode === "login"
+          ? "Login failed. Please check your email and password."
+          : "Signup failed. Please try again.";
+        showAuthStatus(error.message || fallback, "error");
+      } finally {
+        setAuthBusy(false);
       }
     }
 
@@ -1813,7 +1854,6 @@
   </script>
 </body>
 </html>
-
 
 
 
