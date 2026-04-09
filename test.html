@@ -211,6 +211,25 @@
     .auth-status.error { color: var(--danger); }
     .auth-status.success { color: var(--success); }
 
+    .auth-helper-row {
+      display: flex;
+      justify-content: flex-end;
+      margin-top: -4px;
+    }
+
+    .text-link-btn {
+      border: none;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      padding: 0;
+      font-size: 13px;
+    }
+
+    .text-link-btn:hover {
+      color: var(--text);
+    }
+
     #app {
       display: flex;
       min-height: 100vh;
@@ -769,6 +788,20 @@
     .message pre { margin: 10px 0 0; padding: 12px; border-radius: 14px; background: #111111; overflow-x: auto; border: 1px solid rgba(255,255,255,0.08); }
     .message code { font-family: Consolas, monospace; background: rgba(255,255,255,0.08); padding: 2px 6px; border-radius: 8px; }
     .message pre code { background: transparent; padding: 0; }
+    .message-toolbar { display:flex; gap:8px; flex-wrap:wrap; }
+    .message-tool-btn {
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,0.03);
+      color: var(--muted);
+      border-radius: 999px;
+      padding: 6px 10px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .message-tool-btn:hover {
+      color: var(--text);
+      background: rgba(255,255,255,0.06);
+    }
 
     @media (hover: none), (pointer: coarse) {
       .chat-actions {
@@ -890,6 +923,9 @@
           </div>
           <button class="auth-submit" id="authSubmit" type="submit">Log In</button>
         </form>
+        <div class="auth-helper-row">
+          <button class="text-link-btn" type="button" onclick="openResetModal()">Forgot password?</button>
+        </div>
 
         <div class="auth-status" id="authStatus"></div>
       </div>
@@ -969,6 +1005,30 @@
       <div class="modal-actions">
         <button class="modal-btn" type="button" onclick="closeSettings()">Cancel</button>
         <button class="modal-btn primary" type="button" onclick="changePassword()">Update Password</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="resetModal" hidden>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="resetTitle">
+      <h2 class="modal-title" id="resetTitle">Reset Password</h2>
+      <p class="modal-copy">For this project version, reset uses your email and full name instead of email verification.</p>
+      <div class="field">
+        <label for="resetEmail">Email</label>
+        <input id="resetEmail" type="email" placeholder="you@example.com" />
+      </div>
+      <div class="field">
+        <label for="resetName">Full Name</label>
+        <input id="resetName" type="text" placeholder="Your full name" />
+      </div>
+      <div class="field">
+        <label for="resetNewPassword">New Password</label>
+        <input id="resetNewPassword" type="password" placeholder="At least 6 characters" />
+      </div>
+      <div class="modal-status" id="resetStatus"></div>
+      <div class="modal-actions">
+        <button class="modal-btn" type="button" onclick="closeResetModal()">Cancel</button>
+        <button class="modal-btn primary" type="button" onclick="resetPassword()">Reset Password</button>
       </div>
     </div>
   </div>
@@ -1233,7 +1293,23 @@
       return grid;
     }
 
-    function createMessageRow(message) {
+    function getLastCompletedBotIndex() {
+      for (let index = chatHistory.length - 1; index >= 0; index -= 1) {
+        const item = chatHistory[index];
+        if (item.sender === "bot" && !item.status) return index;
+      }
+      return -1;
+    }
+
+    function copyMessageText(text = "") {
+      navigator.clipboard.writeText(text || "").then(() => {
+        showComposerStatus("Reply copied to clipboard.", "success");
+      }).catch(() => {
+        showComposerStatus("Could not copy that reply.", "error");
+      });
+    }
+
+    function createMessageRow(message, index = -1) {
       const row = document.createElement("div");
       row.className = `row ${message.sender}`;
       const wrap = document.createElement("div");
@@ -1264,6 +1340,29 @@
         stack.appendChild(content);
       }
 
+      if (message.sender === "bot" && !message.status) {
+        const toolbar = document.createElement("div");
+        toolbar.className = "message-toolbar";
+
+        const copyButton = document.createElement("button");
+        copyButton.className = "message-tool-btn";
+        copyButton.type = "button";
+        copyButton.innerText = "Copy";
+        copyButton.onclick = () => copyMessageText(message.text || "");
+        toolbar.appendChild(copyButton);
+
+        if (index === getLastCompletedBotIndex()) {
+          const regenerateButton = document.createElement("button");
+          regenerateButton.className = "message-tool-btn";
+          regenerateButton.type = "button";
+          regenerateButton.innerText = "Regenerate";
+          regenerateButton.onclick = () => regenerateLastReply();
+          toolbar.appendChild(regenerateButton);
+        }
+
+        stack.appendChild(toolbar);
+      }
+
       wrap.appendChild(stack);
 
       if (message.sender === "user") {
@@ -1286,7 +1385,7 @@
         setChatTitle();
         return;
       }
-      chatHistory.forEach((message) => shell.appendChild(createMessageRow(message)));
+      chatHistory.forEach((message, index) => shell.appendChild(createMessageRow(message, index)));
       chat.scrollTop = chat.scrollHeight;
       setChatTitle();
     }
@@ -1297,7 +1396,17 @@
       list.innerHTML = "";
       const visibleChats = [...allChats]
         .sort((a, b) => new Date(b.date) - new Date(a.date))
-        .filter((chat) => `${chat.title} ${chat.date}`.toLowerCase().includes(query));
+        .filter((chat) => {
+          const searchableMessages = (chat.messages || [])
+            .map((message) => {
+              const attachmentText = (message.attachments || [])
+                .map((attachment) => `${attachment.name || ""} ${attachment.extractedText || ""}`)
+                .join(" ");
+              return `${message.text || ""} ${attachmentText}`;
+            })
+            .join(" ");
+          return `${chat.title} ${chat.date} ${searchableMessages}`.toLowerCase().includes(query);
+        });
 
       if (visibleChats.length === 0) {
         list.innerHTML = '<div class="chat-date">No chats found.</div>';
@@ -1488,20 +1597,8 @@
       typing();
     }
 
-    async function send() {
-      const input = document.getElementById("input");
-      const message = input.value.trim();
-      const attachments = normalizeAttachments(pendingAttachments);
-      if (!message && attachments.length === 0) return;
-
-      addMessage(message, "user", { attachments });
-      input.value = "";
-      pendingAttachments = [];
-      renderPendingUploads();
-      autoResizeInput();
-      showComposerStatus(attachments.length > 0 ? "Attachment sent with your message." : "", attachments.length > 0 ? "success" : "");
-      await persistChats();
-
+    async function requestAssistantReply(options = {}) {
+      const { speakReply = true } = options;
       const typingMsg = addMessage("Thinking...", "bot", { save: true, status: true });
       await persistChats();
 
@@ -1519,7 +1616,7 @@
         replaceLastBotPlaceholder(data.reply || "No reply");
         await persistChats();
 
-        if (useVoice) {
+        if (useVoice && speakReply) {
           speak(data.reply || "No reply");
           useVoice = false;
         }
@@ -1533,6 +1630,42 @@
         await persistChats();
         showComposerStatus(fallback, "error");
       }
+    }
+
+    async function send() {
+      const input = document.getElementById("input");
+      const message = input.value.trim();
+      const attachments = normalizeAttachments(pendingAttachments);
+      if (!message && attachments.length === 0) return;
+
+      addMessage(message, "user", { attachments });
+      input.value = "";
+      pendingAttachments = [];
+      renderPendingUploads();
+      autoResizeInput();
+      showComposerStatus(attachments.length > 0 ? "Attachment sent with your message." : "", attachments.length > 0 ? "success" : "");
+      await persistChats();
+      await requestAssistantReply({ speakReply: true });
+    }
+
+    async function regenerateLastReply() {
+      let changed = false;
+      while (chatHistory.length > 0 && chatHistory[chatHistory.length - 1].sender === "bot") {
+        chatHistory.pop();
+        changed = true;
+      }
+
+      if (!changed) {
+        showComposerStatus("There is no AI reply available to regenerate yet.", "error");
+        return;
+      }
+
+      renderMessages();
+      updateChatMeta();
+      renderChatList(document.getElementById("searchInput").value);
+      await persistChats();
+      showComposerStatus("Generating a fresh reply...", "success");
+      await requestAssistantReply({ speakReply: false });
     }
 
     function exportCurrentChat() {
@@ -1745,6 +1878,45 @@
       document.getElementById("settingsModal").hidden = true;
     }
 
+    function updateResetStatus(message = "", type = "") {
+      const status = document.getElementById("resetStatus");
+      status.className = `modal-status${type ? ` ${type}` : ""}`;
+      status.innerText = message;
+    }
+
+    function openResetModal() {
+      document.getElementById("resetModal").hidden = false;
+      document.getElementById("resetEmail").value = document.getElementById("authEmail").value.trim();
+      document.getElementById("resetName").value = document.getElementById("authName").value.trim();
+      document.getElementById("resetNewPassword").value = "";
+      updateResetStatus("");
+    }
+
+    function closeResetModal() {
+      document.getElementById("resetModal").hidden = true;
+    }
+
+    async function resetPassword() {
+      const email = document.getElementById("resetEmail").value.trim().toLowerCase();
+      const name = document.getElementById("resetName").value.trim();
+      const newPassword = document.getElementById("resetNewPassword").value;
+
+      updateResetStatus("Resetting password...");
+
+      try {
+        const data = await apiFetch("/auth/reset-password", {
+          method: "POST",
+          body: JSON.stringify({ email, name, newPassword })
+        });
+        updateResetStatus(data.message || "Password reset successful.", "success");
+        switchAuthMode("login");
+        document.getElementById("authEmail").value = email;
+        document.getElementById("authPassword").value = "";
+      } catch (error) {
+        updateResetStatus(error.message || "Password reset failed.", "error");
+      }
+    }
+
     async function changePassword() {
       const currentPassword = document.getElementById("currentPassword").value;
       const newPassword = document.getElementById("newPassword").value;
@@ -1799,7 +1971,17 @@
       list.innerHTML = "";
       const visibleChats = [...allChats]
         .sort((a, b) => new Date(b.date) - new Date(a.date))
-        .filter((chat) => `${chat.title} ${chat.date}`.toLowerCase().includes(query));
+        .filter((chat) => {
+          const searchableMessages = (chat.messages || [])
+            .map((message) => {
+              const attachmentText = (message.attachments || [])
+                .map((attachment) => `${attachment.name || ""} ${attachment.extractedText || ""}`)
+                .join(" ");
+              return `${message.text || ""} ${attachmentText}`;
+            })
+            .join(" ");
+          return `${chat.title} ${chat.date} ${searchableMessages}`.toLowerCase().includes(query);
+        });
 
       if (visibleChats.length === 0) {
         list.innerHTML = '<div class="chat-date">No chats found.</div>';
@@ -1854,7 +2036,3 @@
   </script>
 </body>
 </html>
-
-
-
-

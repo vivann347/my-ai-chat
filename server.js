@@ -3,17 +3,23 @@ import cors from "cors";
 import fetch from "node-fetch";
 import dotenv from "dotenv";
 import path from "path";
+import os from "os";
 import { fileURLToPath } from "url";
 import { promises as fs } from "fs";
 import crypto from "crypto";
 import { PDFParse } from "pdf-parse";
+import Database from "better-sqlite3";
 
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const DATA_DIR = path.join(__dirname, "data");
-const DB_PATH = path.join(DATA_DIR, "db.json");
+const LEGACY_DB_PATH = path.join(DATA_DIR, "db.json");
+const DEFAULT_SQLITE_DIR = process.platform === "win32"
+  ? path.join(process.env.LOCALAPPDATA || os.tmpdir(), "my-ai-app")
+  : DATA_DIR;
+const SQLITE_PATH = process.env.SQLITE_PATH || path.join(DEFAULT_SQLITE_DIR, "app.db");
 
 const app = express();
 app.use(cors());
@@ -24,31 +30,154 @@ const API_KEY = process.env.GROQ_API_KEY;
 const TEXT_MODEL = process.env.GROQ_MODEL || "llama-3.1-8b-instant";
 const VISION_MODEL = process.env.GROQ_VISION_MODEL || "";
 
-let db = {
-  users: [],
-  sessions: [],
-  chats: {}
-};
+let sqlite;
 
-async function ensureDatabase() {
-  await fs.mkdir(DATA_DIR, { recursive: true });
-
+function safeParseJson(value, fallback) {
   try {
-    const raw = await fs.readFile(DB_PATH, "utf8");
-    const parsed = JSON.parse(raw);
-    db = {
-      users: Array.isArray(parsed.users) ? parsed.users : [],
-      sessions: Array.isArray(parsed.sessions) ? parsed.sessions : [],
-      chats: parsed.chats && typeof parsed.chats === "object" ? parsed.chats : {}
-    };
-  } catch (error) {
-    if (error.code !== "ENOENT") throw error;
-    await saveDatabase();
+    return JSON.parse(value);
+  } catch {
+    return fallback;
   }
 }
 
-async function saveDatabase() {
-  await fs.writeFile(DB_PATH, JSON.stringify(db, null, 2), "utf8");
+async function readLegacyDatabase() {
+  try {
+    const raw = await fs.readFile(LEGACY_DB_PATH, "utf8");
+    return safeParseJson(raw, { users: [], sessions: [], chats: {} });
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      return { users: [], sessions: [], chats: {} };
+    }
+    throw error;
+  }
+}
+
+function getUserByEmail(email) {
+  return sqlite.prepare("SELECT * FROM users WHERE email = ?").get(email);
+}
+
+function getUserById(id) {
+  return sqlite.prepare("SELECT * FROM users WHERE id = ?").get(id);
+}
+
+function getSessionByToken(token) {
+  return sqlite.prepare("SELECT * FROM sessions WHERE token = ?").get(token);
+}
+
+function getUserChats(userId) {
+  const row = sqlite.prepare("SELECT chats_json FROM chats WHERE user_id = ?").get(userId);
+  const chats = safeParseJson(row?.chats_json || "[]", []);
+  return Array.isArray(chats) ? chats : [];
+}
+
+function setUserChats(userId, chats) {
+  sqlite.prepare(`
+    INSERT INTO chats (user_id, chats_json, updated_at)
+    VALUES (?, ?, ?)
+    ON CONFLICT(user_id) DO UPDATE SET
+      chats_json = excluded.chats_json,
+      updated_at = excluded.updated_at
+  `).run(userId, JSON.stringify(chats), new Date().toISOString());
+}
+
+function createSession(userId) {
+  const token = createToken();
+  sqlite.prepare("INSERT INTO sessions (token, user_id, created_at) VALUES (?, ?, ?)").run(
+    token,
+    userId,
+    new Date().toISOString()
+  );
+  return token;
+}
+
+async function migrateLegacyJsonIfNeeded() {
+  const userCount = sqlite.prepare("SELECT COUNT(*) AS count FROM users").get().count;
+  if (userCount > 0) return;
+
+  const legacy = await readLegacyDatabase();
+  const users = Array.isArray(legacy.users) ? legacy.users : [];
+  const sessions = Array.isArray(legacy.sessions) ? legacy.sessions : [];
+  const chats = legacy.chats && typeof legacy.chats === "object" ? legacy.chats : {};
+
+  const insertUser = sqlite.prepare(`
+    INSERT OR IGNORE INTO users (id, name, email, password_hash, created_at)
+    VALUES (?, ?, ?, ?, ?)
+  `);
+  const insertSession = sqlite.prepare(`
+    INSERT OR IGNORE INTO sessions (token, user_id, created_at)
+    VALUES (?, ?, ?)
+  `);
+  const upsertChats = sqlite.prepare(`
+    INSERT INTO chats (user_id, chats_json, updated_at)
+    VALUES (?, ?, ?)
+    ON CONFLICT(user_id) DO UPDATE SET
+      chats_json = excluded.chats_json,
+      updated_at = excluded.updated_at
+  `);
+
+  const now = new Date().toISOString();
+  const transaction = sqlite.transaction(() => {
+    users.forEach((user) => {
+      insertUser.run(
+        user.id,
+        user.name || "",
+        normalizeEmail(user.email),
+        user.passwordHash || "",
+        user.createdAt || now
+      );
+    });
+
+    sessions.forEach((session) => {
+      insertSession.run(session.token, session.userId, session.createdAt || now);
+    });
+
+    Object.entries(chats).forEach(([userId, userChats]) => {
+      upsertChats.run(userId, JSON.stringify(Array.isArray(userChats) ? userChats : []), now);
+    });
+  });
+
+  transaction();
+}
+
+async function ensureDatabase() {
+  await fs.mkdir(DATA_DIR, { recursive: true });
+  await fs.mkdir(path.dirname(SQLITE_PATH), { recursive: true });
+  sqlite = new Database(SQLITE_PATH);
+  sqlite.exec(`
+    PRAGMA foreign_keys = ON;
+
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      email TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS sessions (
+      token TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS chats (
+      user_id TEXT PRIMARY KEY,
+      chats_json TEXT NOT NULL DEFAULT '[]',
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS password_resets (
+      token TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+  `);
+
+  await migrateLegacyJsonIfNeeded();
 }
 
 function base64Url(input) {
@@ -87,14 +216,6 @@ function sanitizeUser(user) {
   };
 }
 
-function getUserChats(userId) {
-  return Array.isArray(db.chats[userId]) ? db.chats[userId] : [];
-}
-
-function setUserChats(userId, chats) {
-  db.chats[userId] = chats;
-}
-
 function authMiddleware(req, res, next) {
   const authHeader = req.headers.authorization || "";
   const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
@@ -103,12 +224,12 @@ function authMiddleware(req, res, next) {
     return res.status(401).json({ error: "Missing auth token." });
   }
 
-  const session = db.sessions.find((item) => item.token === token);
+  const session = getSessionByToken(token);
   if (!session) {
     return res.status(401).json({ error: "Invalid or expired session." });
   }
 
-  const user = db.users.find((item) => item.id === session.userId);
+  const user = getUserById(session.user_id);
   if (!user) {
     return res.status(401).json({ error: "User not found." });
   }
@@ -224,7 +345,7 @@ app.post("/auth/signup", async (req, res) => {
     return res.status(400).json({ error: "Password must be at least 6 characters." });
   }
 
-  if (db.users.some((user) => user.email === email)) {
+  if (getUserByEmail(email)) {
     return res.status(409).json({ error: "An account with that email already exists." });
   }
 
@@ -232,15 +353,16 @@ app.post("/auth/signup", async (req, res) => {
     id: crypto.randomUUID(),
     name,
     email,
-    passwordHash: hashPassword(password),
-    createdAt: new Date().toISOString()
+    password_hash: hashPassword(password),
+    created_at: new Date().toISOString()
   };
+  sqlite.prepare(`
+    INSERT INTO users (id, name, email, password_hash, created_at)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(user.id, user.name, user.email, user.password_hash, user.created_at);
 
-  const token = createToken();
-  db.users.push(user);
-  db.sessions.push({ token, userId: user.id, createdAt: new Date().toISOString() });
+  const token = createSession(user.id);
   setUserChats(user.id, []);
-  await saveDatabase();
 
   res.status(201).json({ token, user: sanitizeUser(user), chats: [] });
 });
@@ -249,14 +371,12 @@ app.post("/auth/login", async (req, res) => {
   const email = normalizeEmail(req.body.email);
   const password = String(req.body.password || "");
 
-  const user = db.users.find((item) => item.email === email);
-  if (!user || !verifyPassword(password, user.passwordHash)) {
+  const user = getUserByEmail(email);
+  if (!user || !verifyPassword(password, user.password_hash)) {
     return res.status(401).json({ error: "Invalid email or password." });
   }
 
-  const token = createToken();
-  db.sessions.push({ token, userId: user.id, createdAt: new Date().toISOString() });
-  await saveDatabase();
+  const token = createSession(user.id);
 
   res.json({ token, user: sanitizeUser(user), chats: getUserChats(user.id) });
 });
@@ -277,18 +397,48 @@ app.post("/auth/change-password", authMiddleware, async (req, res) => {
     return res.status(400).json({ error: "New password must be at least 6 characters." });
   }
 
-  if (!verifyPassword(currentPassword, req.user.passwordHash)) {
+  if (!verifyPassword(currentPassword, req.user.password_hash)) {
     return res.status(401).json({ error: "Current password is incorrect." });
   }
 
-  req.user.passwordHash = hashPassword(newPassword);
-  await saveDatabase();
+  const nextHash = hashPassword(newPassword);
+  sqlite.prepare("UPDATE users SET password_hash = ? WHERE id = ?").run(nextHash, req.user.id);
   res.json({ success: true });
 });
 
+app.post("/auth/reset-password", async (req, res) => {
+  const email = normalizeEmail(req.body.email);
+  const name = String(req.body.name || "").trim().toLowerCase();
+  const newPassword = String(req.body.newPassword || "");
+
+  if (!email || !name || !newPassword) {
+    return res.status(400).json({ error: "Email, full name, and a new password are required." });
+  }
+
+  if (newPassword.length < 6) {
+    return res.status(400).json({ error: "New password must be at least 6 characters." });
+  }
+
+  const user = getUserByEmail(email);
+  if (!user) {
+    return res.status(404).json({ error: "No account was found for that email." });
+  }
+
+  if (String(user.name || "").trim().toLowerCase() !== name) {
+    return res.status(401).json({ error: "Name and email do not match our records." });
+  }
+
+  sqlite.prepare("UPDATE users SET password_hash = ? WHERE id = ?").run(hashPassword(newPassword), user.id);
+  sqlite.prepare("DELETE FROM sessions WHERE user_id = ?").run(user.id);
+
+  res.json({
+    success: true,
+    message: "Password reset successful. Please log in with your new password."
+  });
+});
+
 app.post("/auth/logout", authMiddleware, async (req, res) => {
-  db.sessions = db.sessions.filter((session) => session.token !== req.token);
-  await saveDatabase();
+  sqlite.prepare("DELETE FROM sessions WHERE token = ?").run(req.token);
   res.json({ success: true });
 });
 
@@ -303,7 +453,6 @@ app.put("/chats", authMiddleware, async (req, res) => {
   }
 
   setUserChats(req.user.id, chats);
-  await saveDatabase();
   res.json({ success: true });
 });
 
