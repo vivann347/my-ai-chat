@@ -1100,7 +1100,7 @@
       if (authToken) headers.Authorization = `Bearer ${authToken}`;
       if (!headers["Content-Type"] && options.body) headers["Content-Type"] = "application/json";
 
-      const response = await fetch("https://my-ai-chat-1-5qhc.onrender.com" + url, { ...options, headers });
+const response = await fetch("https://my-ai-chat-2-5f2c.onrender.com" + url, { ...options, headers });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(data.error || data.reply || `Request failed with ${response.status}`);
